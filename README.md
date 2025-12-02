@@ -1,6 +1,5 @@
 # l0gin - React + Spring Boot + JWT + MyBatis
 
-## 🎯 프로젝트 개요
 
 풀스택 웹 구성 
 Jenkins K8s 세팅 테스트
