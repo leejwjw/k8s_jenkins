@@ -48,3 +48,15 @@ frontend/.env.production.local
 frontend/npm-debug.log*
 frontend/yarn-debug.log*
 frontend/yarn-error.log*
+
+### Security ###
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+*.crt
+*.cer
+*-key.json
+secrets/
+credentials/
