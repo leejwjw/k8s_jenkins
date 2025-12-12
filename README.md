@@ -129,14 +129,16 @@ curl -X GET http://localhost:8080/api/users \
 ```
 jun-demo/
 ├── src/main/java/com/example/jun_demo/
-│   ├── config/          # 설정 클래스 (Security, JWT)
+│   ├── config/          # 설정 클래스 (Security, JWT, Kafka)
 │   ├── controller/      # REST API 컨트롤러
 │   ├── dto/             # 데이터 전송 객체
 │   ├── entity/          # JPA 엔티티
+│   ├── event/           # Kafka 이벤트 모델
 │   ├── exception/       # 예외 처리
 │   ├── mapper/          # MyBatis 매퍼
 │   ├── security/        # JWT 필터
 │   ├── service/         # 비즈니스 로직
+│   ├── consumer/        # Kafka 컨슈머
 │   └── util/            # 유틸리티 (JWT)
 ├── src/main/resources/
 │   ├── application.properties  # 애플리케이션 설정
@@ -153,4 +155,78 @@ jun-demo/
     │   ├── App.jsx       # 메인 앱
     │   └── index.css     # 글로벌 스타일
     └── package.json      # 의존성
+
+## 📨 Kafka 메시징
+
+### Kafka 개요
+
+이 프로젝트는 이벤트 기반 아키텍처를 위해 Apache Kafka를 통합했습니다:
+- **사용자 이벤트**: 생성, 수정, 삭제
+- **인증 이벤트**: 로그인 성공/실패, 로그아웃
+- **감사 로그**: 모든 중요 작업 추적
+
+### Kafka 설정
+
+#### 토픽 구성
+
+| 토픽 | 파티션 수 | 복제 계수 | 보존 기간 | 용도 |
+|------|----------|----------|----------|------|
+| `user.events` | 3 | 1 (개발) | 7일 | 사용자 생명주기 이벤트 |
+| `auth.events` | 3 | 1 (개발) | 7일 | 인증 이벤트 |
+| `audit.logs` | 5 | 1 (개발) | 7일 | 감사 추적 |
+
+#### 파티션 전략
+
+- **Key**: User ID, Session ID, Entity ID 사용
+- **목적**: 동일 엔티티의 이벤트 순서 보장
+- **컨슈머 그룹**: `user-event-logger`, `auth-event-logger`, `audit-event-logger`
+
+### Docker로 Kafka 실행
+
+```bash
+# Kafka 시작 (단일 브로커)
+docker run -d --name kafka -p 9092:9092 apache/kafka:latest
+
+# 토픽 확인
+docker exec kafka kafka-topics.sh --list --bootstrap-server localhost:9092
+
+# 이벤트 모니터링
+docker exec kafka kafka-console-consumer.sh --topic user.events --bootstrap-server localhost:9092 --from-beginning
+```
+
+### 이벤트 예시
+
+#### 사용자 생성 이벤트
+```json
+{
+  "eventType": "CREATED",
+  "userId": 1,
+  "username": "testuser",
+  "email": "test@example.com",
+  "timestamp": "2025-12-12T14:30:00",
+  "ipAddress": "127.0.0.1"
+}
+```
+
+#### 로그인 성공 이벤트
+```json
+{
+  "eventType": "LOGIN_SUCCESS",
+  "userId": 1,
+  "username": "testuser",
+  "sessionId": "uuid-here",
+  "timestamp": "2025-12-12T14:30:00",
+  "ipAddress": "127.0.0.1",
+  "userAgent": "Mozilla/5.0..."
+}
+```
+
+### 설계 문서
+
+상세한 Kafka 설계 및 운영 가이드는 [KAFKA_DESIGN.md](KAFKA_DESIGN.md)를 참조하세요:
+- 파티션 수 결정 근거
+- 키 전략 (순서 보장 vs 부하 분산)
+- 컨슈머 그룹 크기 조정
+- 복제 계수 트레이드오프
+- 모니터링 및 트러블슈팅
 

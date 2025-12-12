@@ -2,13 +2,18 @@ package com.example.jun_demo.service;
 
 import com.example.jun_demo.dto.UserDto;
 import com.example.jun_demo.entity.User;
+import com.example.jun_demo.event.UserEvent;
 import com.example.jun_demo.mapper.UserMapper;
 import com.example.jun_demo.util.JwtUtil;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -22,6 +27,8 @@ public class UserService {
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
+    private final KafkaProducerService kafkaProducerService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
      * 회원가입
@@ -46,6 +53,22 @@ public class UserService {
                 .build();
 
         userMapper.insert(user);
+
+        // Kafka 이벤트 발행 - 사용자 생성
+        try {
+            UserEvent event = UserEvent.builder()
+                    .eventType(UserEvent.EventType.CREATED)
+                    .userId(user.getId())
+                    .username(user.getUsername())
+                    .email(user.getEmail())
+                    .name(user.getName())
+                    .timestamp(LocalDateTime.now())
+                    .currentData(objectMapper.writeValueAsString(user))
+                    .build();
+            kafkaProducerService.sendUserEvent(event, String.valueOf(user.getId()));
+        } catch (JsonProcessingException e) {
+            log.error("Failed to serialize user data for Kafka event", e);
+        }
 
         // JWT 토큰 생성
         String token = jwtUtil.generateToken(user.getUsername());
@@ -109,6 +132,14 @@ public class UserService {
         User user = userMapper.findById(id)
                 .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다"));
 
+        // 변경 전 상태 저장
+        String previousData = null;
+        try {
+            previousData = objectMapper.writeValueAsString(user);
+        } catch (JsonProcessingException e) {
+            log.error("Failed to serialize previous user data", e);
+        }
+
         if (request.getEmail() != null) {
             user.setEmail(request.getEmail());
         }
@@ -121,6 +152,23 @@ public class UserService {
 
         userMapper.update(user);
 
+        // Kafka 이벤트 발행 - 사용자 수정
+        try {
+            UserEvent event = UserEvent.builder()
+                    .eventType(UserEvent.EventType.UPDATED)
+                    .userId(user.getId())
+                    .username(user.getUsername())
+                    .email(user.getEmail())
+                    .name(user.getName())
+                    .timestamp(LocalDateTime.now())
+                    .previousData(previousData)
+                    .currentData(objectMapper.writeValueAsString(user))
+                    .build();
+            kafkaProducerService.sendUserEvent(event, String.valueOf(user.getId()));
+        } catch (JsonProcessingException e) {
+            log.error("Failed to serialize user data for Kafka event", e);
+        }
+
         return convertToDto(user);
     }
 
@@ -128,10 +176,26 @@ public class UserService {
      * 사용자 삭제
      */
     public void deleteUser(Long id) {
-        if (!userMapper.findById(id).isPresent()) {
-            throw new RuntimeException("사용자를 찾을 수 없습니다");
-        }
+        User user = userMapper.findById(id)
+                .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다"));
+
         userMapper.deleteById(id);
+
+        // Kafka 이벤트 발행 - 사용자 삭제
+        try {
+            UserEvent event = UserEvent.builder()
+                    .eventType(UserEvent.EventType.DELETED)
+                    .userId(user.getId())
+                    .username(user.getUsername())
+                    .email(user.getEmail())
+                    .name(user.getName())
+                    .timestamp(LocalDateTime.now())
+                    .previousData(objectMapper.writeValueAsString(user))
+                    .build();
+            kafkaProducerService.sendUserEvent(event, String.valueOf(user.getId()));
+        } catch (JsonProcessingException e) {
+            log.error("Failed to serialize user data for Kafka event", e);
+        }
     }
 
     /**
